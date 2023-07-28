@@ -185,7 +185,7 @@ func (s *Session) processResponse(buf []byte) error {
 	// Process all NTS extension fields.
 	offset := ntpHeaderLen
 	cur := buf[offset:]
-	for len(cur) > 4 {
+	for len(cur) >= 4 {
 		xtype := extType(binary.BigEndian.Uint16(cur[0:2]))
 		xlen := int(binary.BigEndian.Uint16(cur[2:4]))
 		if len(cur) < xlen {
@@ -215,21 +215,23 @@ func (s *Session) processResponse(buf []byte) error {
 			}
 
 			// NOTE: The siv-go package has an undocumented issue where all
-			// memory accesses must be 64-bit aligned or it segfaults. To
-			// prevent this, copy the nonce and ciphertext into newly
-			// allocated, memory-aligned slices before decrypting and
-			// authenticating.
-			nonce := allocAligned(nonceLen)
-			copy(nonce, body[4:])
-			ciphertext := allocAligned(ciphertextLen)
-			copy(ciphertext, body[4+nonceLenPadded:])
+			// memory accesses must be 8-byte aligned or else it segfaults. To
+			// prevent this, check if the nonce and ciphertext within the
+			// packet are memory aligned, and if not, copy them into aligned
+			// buffers before decrypting and authenticating.
+			ptr := body[4:]
+			nonce := align(ptr[:nonceLen])
+			ptr = ptr[nonceLenPadded:]
+			ciphertext := align(ptr[:ciphertextLen])
 
-			// Decrypt and authenticate. The ciphertext contains only
-			// encrypted cookies.
+			// Decrypt the ciphertext and authenticate the portion of the
+			// packet appearing before this extension field.
 			plaintext, err := s.cipherS2C.Open(nil, nonce, ciphertext, buf[:offset])
 			if err != nil {
 				return ErrAuthFailedOnClient
 			}
+
+			// The plaintext should contain only cookies.
 			err = s.processCookies(plaintext)
 			if err != nil {
 				return err
@@ -243,7 +245,7 @@ func (s *Session) processResponse(buf []byte) error {
 }
 
 func (s *Session) processCookies(buf []byte) error {
-	for len(buf) > 4 {
+	for len(buf) >= 4 {
 		xtype := extType(binary.BigEndian.Uint16(buf[0:2]))
 		xlen := int(binary.BigEndian.Uint16(buf[2:4]))
 		if len(buf) < xlen {
@@ -262,12 +264,34 @@ func (s *Session) processCookies(buf []byte) error {
 	return nil
 }
 
+func align(slice []byte) []byte {
+	// If the slice is already 8-byte aligned, simply return it.
+	ptr := uintptr(unsafe.Pointer(&slice[0]))
+	if (ptr & uintptr(7)) == 0 {
+		return slice
+	}
+
+	// The slice was unaligned, so allocate an aligned buffer and copy the
+	// data into it.
+	buf := allocAligned(len(slice))
+	copy(buf, slice)
+	return buf
+}
+
 func allocAligned(size int) []byte {
+	// Try allocating a slice of the requested size. If the result is 8-byte
+	// aligned, we're done.
 	buf := make([]byte, size)
 	ptr := uintptr(unsafe.Pointer(&buf[0]))
 	if (ptr & uintptr(7)) == 0 {
 		return buf
 	}
+
+	// Given the way the underlying go slice allocator works, this line of
+	// code should not be reached. But just in case it is...
+
+	// Allocate a buffer slightly larger than requested and return a sub-slice
+	// that is guaranteed to be aligned.
 	buf = make([]byte, size+7)
 	ptr = uintptr(unsafe.Pointer(&buf[0]))
 	offset := (8 - int(ptr&uintptr(7))) & 7
