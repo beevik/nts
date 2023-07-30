@@ -16,7 +16,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"net"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -49,16 +48,11 @@ type Session struct {
 // NewSession creates an NTS session by connecting to an NTS key-exchange
 // server and requesting keys and cookies to be used for future secure NTP
 // queries. Once keys and cookies have been received, the connection is
-// dropped. The address is of the form "host", "host:port", "host%zone:port",
-// "[host]:port" or "[host%zone]:port". If no port is included, NTS default
-// port 4460 is used.
+// dropped. The address is of the form "host" or "host:port", where host is a
+// domain name address. If no port is included, NTS default port 4460 is used.
 func NewSession(address string) (*Session, error) {
-	if _, _, err := net.SplitHostPort(address); err != nil {
-		if strings.Contains(err.Error(), "missing port") {
-			address = net.JoinHostPort(address, strconv.Itoa(defaultNtsPort))
-		} else {
-			return nil, err
-		}
+	if strings.IndexByte(address, ':') < 0 {
+		address += ":" + strconv.Itoa(defaultNtsPort)
 	}
 
 	s := &Session{ntskeAddr: address}
