@@ -5,9 +5,8 @@
 package nts
 
 import (
-	"encoding/binary"
-	"fmt"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,16 @@ import (
 	"github.com/beevik/ntp"
 )
 
-const host = "time.cloudflare.com"
+// The NTS key-exchange server to use for online unit tests. May be overridden
+// by the NTS_HOST environment variable.
+var host string = "time.cloudflare.com"
+
+func init() {
+	h := os.Getenv("NTS_HOST")
+	if h != "" {
+		host = h
+	}
+}
 
 func TestOnlineSession(t *testing.T) {
 	s, err := NewSession(host)
@@ -63,7 +71,7 @@ func logResponse(t *testing.T, r *ntp.Response) {
 	t.Logf("[%s]   ~TrueTime: %s", host, now.Add(r.ClockOffset).Format(timeFormat))
 	t.Logf("[%s]    XmitTime: %s", host, r.Time.Format(timeFormat))
 	t.Logf("[%s]     Stratum: %d", host, r.Stratum)
-	t.Logf("[%s]       RefID: %s (0x%08x)", host, formatRefID(r.ReferenceID, r.Stratum), r.ReferenceID)
+	t.Logf("[%s]       RefID: %s (0x%08x)", host, r.ReferenceString(), r.ReferenceID)
 	t.Logf("[%s]     RefTime: %s", host, r.ReferenceTime.Format(timeFormat))
 	t.Logf("[%s]         RTT: %s", host, r.RTT)
 	t.Logf("[%s]        Poll: %s", host, r.Poll)
@@ -74,35 +82,6 @@ func logResponse(t *testing.T, r *ntp.Response) {
 	t.Logf("[%s]    MinError: %s", host, r.MinError)
 	t.Logf("[%s]        Leap: %d", host, r.Leap)
 	t.Logf("[%s]    KissCode: %s", host, stringOrEmpty(r.KissCode))
-}
-
-func formatRefID(id uint32, stratum uint8) string {
-	if stratum == 0 {
-		return "<kiss>"
-	}
-
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, id)
-
-	// Stratum 1 ref IDs typically contain ASCII-encoded string identifiers.
-	if stratum == 1 {
-		const dot = rune(0x22c5)
-		var r []rune
-		for i := range b {
-			if b[i] == 0 {
-				break
-			}
-			if b[i] >= 32 && b[i] <= 126 {
-				r = append(r, rune(b[i]))
-			} else {
-				r = append(r, dot)
-			}
-		}
-		return fmt.Sprintf(".%s.", string(r))
-	}
-
-	// Stratum 2+ ref IDs typically contain IPv4 addresses.
-	return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
 }
 
 func stringOrEmpty(s string) string {

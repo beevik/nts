@@ -10,6 +10,8 @@ github.com/beevik/ntp v1.1.2-0.20230713022315-f5ef9bf2ce67 h1:r8cPBob+wu0OnDmm1W
 github.com/beevik/ntp v1.1.2-0.20230713022315-f5ef9bf2ce67/go.mod h1:vD6h1um4kzXpqmLTuu0cCLcC+NfvC0IC+ltmEDA8E78=
 github.com/beevik/ntp v1.2.0 h1:n1teVGbd4YM36FlGvWYfccBIdGzeaakHrTlo6RSL8mw=
 github.com/beevik/ntp v1.2.0/go.mod h1:vD6h1um4kzXpqmLTuu0cCLcC+NfvC0IC+ltmEDA8E78=
+github.com/beevik/ntp v1.3.0 h1:/w5VhpW5BGKS37vFm1p9oVk/t4HnnkKZAZIubHM6F7Q=
+github.com/beevik/ntp v1.3.0/go.mod h1:vD6h1um4kzXpqmLTuu0cCLcC+NfvC0IC+ltmEDA8E78=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
