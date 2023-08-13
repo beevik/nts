@@ -45,11 +45,13 @@ const (
 )
 
 func (s *Session) performKeyExchange() error {
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: false,
-		MinVersion:         tls.VersionTLS13,
-		NextProtos:         []string{ntskeProtocol},
+	tlsConfig := s.tlsConfig
+	if s.tlsConfig == nil {
+		tlsConfig = &tls.Config{}
 	}
+	tlsConfig.MinVersion = tls.VersionTLS13
+	tlsConfig.NextProtos = []string{ntskeProtocol}
+
 	dialer := &net.Dialer{Timeout: time.Second * 5}
 	conn, err := tls.DialWithDialer(dialer, "tcp", s.ntskeAddr, tlsConfig)
 	if err != nil {
