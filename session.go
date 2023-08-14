@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -43,6 +44,13 @@ type Session struct {
 	cipherC2S cipher.AEAD // client-to-server authentication & encryption
 	cipherS2C cipher.AEAD // server-to-client authentication & encryption
 	uniqueID  []byte      // most recently transmitted unique ID
+	tlsConfig *tls.Config // tls configuration for NTS key exchange
+}
+
+// SessionOptions contains options for customizing the behavior of an NTS
+// session.
+type SessionOptions struct {
+	TLSConfig *tls.Config // TLS configuration for NTS key exchange
 }
 
 // NewSession creates an NTS session by connecting to an NTS key-exchange
@@ -51,11 +59,20 @@ type Session struct {
 // dropped. The address is of the form "host" or "host:port", where host is a
 // domain name address. If no port is included, NTS default port 4460 is used.
 func NewSession(address string) (*Session, error) {
+	return NewSessionWithOptions(address, &SessionOptions{})
+}
+
+// NewSessionWithOptions performs the same function as NewSession but allows
+// for the customization of certain authentication behaviors.
+func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error) {
 	if strings.IndexByte(address, ':') < 0 {
 		address += ":" + strconv.Itoa(defaultNtsPort)
 	}
 
-	s := &Session{ntskeAddr: address}
+	s := &Session{
+		ntskeAddr: address,
+		tlsConfig: opt.TLSConfig.Clone(),
+	}
 	err := s.performKeyExchange()
 	if err != nil {
 		return nil, err

@@ -30,6 +30,22 @@ NTS-capable NTP server. Once the session has been created, the network
 connection to the key-exchange server is immediately dropped and all future
 queries proceed via NTP using the session's query functions.
 
+If you wish to customize the behavior of the session, you may do so by using
+[`NewSessionWithOptions`](https://godoc.org/github.com/beevik/nts#NewSessionWithOptions)
+instead of `NewSession`.
+
+```go
+opt := &nts.SessionOptions{
+    TLSConfig: &tls.Config{
+        RootCAs: certPool,
+    },
+}
+session, err := nts.NewSessionWithOptions(host, opt)
+```
+
+See the documentation for
+[`SessionOptions`](https://godoc.org/github.com/beevik/nts#SessionOptions) for a
+list of available customizations.
 
 ## Querying time synchronization data
 
