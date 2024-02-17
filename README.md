@@ -93,8 +93,7 @@ list of available customizations.
 
 NTS is a relatively new protocol, having become an IETF RFC in September 2020.
 So there are a limited number of NTS key-exchange servers available for public
-use. You can find a list
-[here](https://netfuture.ch/2021/12/transparent-trustworthy-time-with-ntp-and-nts/#server-list).
+use. You can find a list [here](https://netfuture.ch/public-nts-server-list/).
 The [NTP pool](https://www.pool.ntp.org) does not currently support NTS.
 
 If you wish to operate your own NTS-capable NTP server, you may install
