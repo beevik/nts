@@ -14,7 +14,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"time"
 
 	"github.com/secure-io/siv-go"
 )
@@ -45,15 +44,15 @@ const (
 )
 
 func (s *Session) performKeyExchange() error {
-	tlsConfig := s.tlsConfig
-	if s.tlsConfig == nil {
-		tlsConfig = &tls.Config{}
+	dialer := s.options.Dialer
+	if dialer == nil {
+		dialer = func(network, addr string, tlsConfig *tls.Config) (*tls.Conn, error) {
+			d := &net.Dialer{Timeout: s.options.Timeout}
+			return tls.DialWithDialer(d, network, addr, tlsConfig)
+		}
 	}
-	tlsConfig.MinVersion = tls.VersionTLS13
-	tlsConfig.NextProtos = []string{ntskeProtocol}
 
-	dialer := &net.Dialer{Timeout: time.Second * 5}
-	conn, err := tls.DialWithDialer(dialer, "tcp", s.ntskeAddr, tlsConfig)
+	conn, err := dialer("tcp", s.ntskeAddr, s.options.TLSConfig)
 	if err != nil {
 		return fmt.Errorf("key exchange failure: %s", err.Error())
 	}
@@ -191,6 +190,11 @@ loop:
 	}
 
 	s.ntpAddr = net.JoinHostPort(s.ntpAddr, strconv.Itoa(port))
+
+	// If the NTP address override resolver is defined, call it.
+	if s.options.Resolver != nil {
+		s.ntpAddr = s.options.Resolver(s.ntpAddr)
+	}
 
 	// Extract encryption keys from the TLS connection.
 	keyC2S, keyS2C, err := extractKeys(conn, algoAEAD_AES_SIV_CMAC_256)

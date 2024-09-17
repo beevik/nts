@@ -32,13 +32,16 @@ queries proceed via NTP using the session's query functions.
 
 If you wish to customize the behavior of the session, you may do so by using
 [`NewSessionWithOptions`](https://godoc.org/github.com/beevik/nts#NewSessionWithOptions)
-instead of `NewSession`.
+instead of `NewSession`. For example:
 
 ```go
 opt := &nts.SessionOptions{
     TLSConfig: &tls.Config{
         RootCAs: certPool,
     },
+    Timeout: 30 * time.Second,
+    Dialer: customDialer,
+    Resolver: customResolver,
 }
 session, err := nts.NewSessionWithOptions(host, opt)
 ```

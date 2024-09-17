@@ -19,6 +19,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/beevik/ntp"
@@ -38,19 +39,40 @@ var (
 // session's internal state is updated as NTP queries are made against an
 // NTS-capable NTP server.
 type Session struct {
-	ntskeAddr string      // "host:port" address used for NTS key exchange
-	ntpAddr   string      // "host:port" address to use for NTP service
-	cookies   cookieJar   // container for cookies consumed by NTP queries
-	cipherC2S cipher.AEAD // client-to-server authentication & encryption
-	cipherS2C cipher.AEAD // server-to-client authentication & encryption
-	uniqueID  []byte      // most recently transmitted unique ID
-	tlsConfig *tls.Config // tls configuration for NTS key exchange
+	options   SessionOptions // options provided at session creation time
+	ntskeAddr string         // "host:port" address used for NTS key exchange
+	ntpAddr   string         // "host:port" address to use for NTP service
+	cookies   cookieJar      // container for cookies consumed by NTP queries
+	cipherC2S cipher.AEAD    // client-to-server authentication & encryption
+	cipherS2C cipher.AEAD    // server-to-client authentication & encryption
+	uniqueID  []byte         // most recently transmitted unique ID
 }
 
 // SessionOptions contains options for customizing the behavior of an NTS
 // session.
 type SessionOptions struct {
-	TLSConfig *tls.Config // TLS configuration for NTS key exchange
+	// TLSConfig is used to override the default TLS configuration for NTS key
+	// exchange. Attempts to downgrade the TLS protocol version below 1.3
+	// using this override are ignored.
+	TLSConfig *tls.Config
+
+	// Timeout determines how long the session waits for a response from the
+	// key exchange server before failing with a timeout error. Defaults to 5
+	// seconds.
+	Timeout time.Duration
+
+	// Dialer is a callback that overrides the default TLS dialer behavior
+	// used to establish a connection with the NTS key exchange endpoint's
+	// network address. The tlsConfig is the TLS configuration used to
+	// establish the connection.
+	Dialer func(network, addr string, tlsConfig *tls.Config) (*tls.Conn, error)
+
+	// Resolver is a callback used to override the NTP address returned by the
+	// NTS key exchange protocol. The addr parameter contains the "host:port"
+	// address of the NTP server returned by the key exchange protocol. The
+	// function is expected to return a "host:port" address to override this
+	// address. This option is commonly used in proxy setups.
+	Resolver func(addr string) string
 }
 
 // NewSession creates an NTS session by connecting to an NTS key-exchange
@@ -70,9 +92,24 @@ func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error
 	}
 
 	s := &Session{
+		options:   *opt,
 		ntskeAddr: address,
-		tlsConfig: opt.TLSConfig.Clone(),
 	}
+
+	if s.options.TLSConfig == nil {
+		s.options.TLSConfig = &tls.Config{}
+	} else {
+		s.options.TLSConfig = s.options.TLSConfig.Clone()
+	}
+	if s.options.TLSConfig.MinVersion < tls.VersionTLS13 {
+		s.options.TLSConfig.MinVersion = tls.VersionTLS13
+	}
+	s.options.TLSConfig.NextProtos = []string{ntskeProtocol}
+
+	if s.options.Timeout == 0 {
+		s.options.Timeout = time.Second * 5
+	}
+
 	err := s.performKeyExchange()
 	if err != nil {
 		return nil, err
