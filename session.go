@@ -38,19 +38,20 @@ var (
 // session's internal state is updated as NTP queries are made against an
 // NTS-capable NTP server.
 type Session struct {
-	ntskeAddr string      // "host:port" address used for NTS key exchange
-	ntpAddr   string      // "host:port" address to use for NTP service
-	cookies   cookieJar   // container for cookies consumed by NTP queries
-	cipherC2S cipher.AEAD // client-to-server authentication & encryption
-	cipherS2C cipher.AEAD // server-to-client authentication & encryption
-	uniqueID  []byte      // most recently transmitted unique ID
-	tlsConfig *tls.Config // tls configuration for NTS key exchange
+	ntskeAddr string                                        // "host:port" address used for NTS key exchange
+	ntpAddr   string                                        // "host:port" address to use for NTP service
+	cookies   cookieJar                                     // container for cookies consumed by NTP queries
+	cipherC2S cipher.AEAD                                   // client-to-server authentication & encryption
+	cipherS2C cipher.AEAD                                   // server-to-client authentication & encryption
+	uniqueID  []byte                                        // most recently transmitted unique ID
+	dial      func(network, addr string) (*tls.Conn, error) // dial returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
 }
 
 // SessionOptions contains options for customizing the behavior of an NTS
 // session.
 type SessionOptions struct {
-	TLSConfig *tls.Config // TLS configuration for NTS key exchange
+	TLSConfig *tls.Config                                   // TLS configuration for NTS key exchange, only used in the defaultDialer
+	Dial      func(network, addr string) (*tls.Conn, error) // Dial returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
 }
 
 // NewSession creates an NTS session by connecting to an NTS key-exchange
@@ -69,9 +70,20 @@ func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error
 		address += ":" + strconv.Itoa(defaultNtsPort)
 	}
 
+	tlsConfig := opt.TLSConfig.Clone()
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	}
+	TLSConfigOverrides(tlsConfig)
+
+	dial := defaultDial(tlsConfig)
+	if opt.Dial != nil {
+		dial = opt.Dial
+	}
+
 	s := &Session{
 		ntskeAddr: address,
-		tlsConfig: opt.TLSConfig.Clone(),
+		dial:      dial,
 	}
 	err := s.performKeyExchange()
 	if err != nil {

@@ -35,10 +35,20 @@ If you wish to customize the behavior of the session, you may do so by using
 instead of `NewSession`.
 
 ```go
+// Custom TLS config
 opt := &nts.SessionOptions{
     TLSConfig: &tls.Config{
         RootCAs: certPool,
     },
+}
+session, err := nts.NewSessionWithOptions(host, opt)
+
+// Custom dialer
+func dial(network, addr string) (*tls.Conn, error) {
+    // custom logic to dial address
+}
+opt := &nts.SessionOptions{
+    Dial: dial,
 }
 session, err := nts.NewSessionWithOptions(host, opt)
 ```
