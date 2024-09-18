@@ -44,14 +44,14 @@ type Session struct {
 	cipherC2S cipher.AEAD                                   // client-to-server authentication & encryption
 	cipherS2C cipher.AEAD                                   // server-to-client authentication & encryption
 	uniqueID  []byte                                        // most recently transmitted unique ID
-	dial      func(network, addr string) (*tls.Conn, error) // dial returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
+	dialer    func(network, addr string) (*tls.Conn, error) // dial returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
 }
 
 // SessionOptions contains options for customizing the behavior of an NTS
 // session.
 type SessionOptions struct {
 	TLSConfig *tls.Config                                   // TLS configuration for NTS key exchange, only used in the defaultDialer
-	Dial      func(network, addr string) (*tls.Conn, error) // Dial returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
+	Dialer    func(network, addr string) (*tls.Conn, error) // Dialer returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
 }
 
 // NewSession creates an NTS session by connecting to an NTS key-exchange
@@ -76,14 +76,14 @@ func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error
 	}
 	TLSConfigOverrides(tlsConfig)
 
-	dial := defaultDial(tlsConfig)
-	if opt.Dial != nil {
-		dial = opt.Dial
+	dialer := defaultDialer(tlsConfig)
+	if opt.Dialer != nil {
+		dialer = opt.Dialer
 	}
 
 	s := &Session{
 		ntskeAddr: address,
-		dial:      dial,
+		dialer:    dialer,
 	}
 	err := s.performKeyExchange()
 	if err != nil {

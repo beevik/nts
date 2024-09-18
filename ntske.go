@@ -45,13 +45,13 @@ const (
 )
 
 // TLSConfigOverrides sets the required TLS config fields, it should be used if
-// a custom dialer is used in SessionOptions.Dial
+// a custom dialer is used in SessionOptions.Dialer
 func TLSConfigOverrides(tlsConfig *tls.Config) {
 	tlsConfig.MinVersion = tls.VersionTLS13
 	tlsConfig.NextProtos = []string{ntskeProtocol}
 }
 
-func defaultDial(tlsConfig *tls.Config) func(network, addr string) (*tls.Conn, error) {
+func defaultDialer(tlsConfig *tls.Config) func(network, addr string) (*tls.Conn, error) {
 	return func(network, addr string) (*tls.Conn, error) {
 		dialer := &net.Dialer{Timeout: time.Second * 5}
 		return tls.DialWithDialer(dialer, network, addr, tlsConfig)
@@ -59,7 +59,7 @@ func defaultDial(tlsConfig *tls.Config) func(network, addr string) (*tls.Conn, e
 }
 
 func (s *Session) performKeyExchange() error {
-	conn, err := s.dial("tcp", s.ntskeAddr)
+	conn, err := s.dialer("tcp", s.ntskeAddr)
 	if err != nil {
 		return fmt.Errorf("key exchange failure: %s", err.Error())
 	}
