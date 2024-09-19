@@ -52,6 +52,7 @@ type Session struct {
 type SessionOptions struct {
 	TLSConfig *tls.Config                                   // TLS configuration for NTS key exchange, only used in the defaultDialer
 	Dialer    func(network, addr string) (*tls.Conn, error) // Dialer returns a net.Conn that has completed a TLS handshake, if nil the defaultDialer is used
+	NTPAddr   string                                        // NTPAddr overrides the NTP address discovered from the NTS connection, this can be used with the custom Dialer when traversing a proxy
 }
 
 // NewSession creates an NTS session by connecting to an NTS key-exchange
@@ -88,6 +89,10 @@ func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error
 	err := s.performKeyExchange()
 	if err != nil {
 		return nil, err
+	}
+
+	if opt.NTPAddr != "" {
+		s.ntpAddr = opt.NTPAddr
 	}
 	return s, nil
 }
