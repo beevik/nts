@@ -44,11 +44,14 @@ opt := &nts.SessionOptions{
 session, err := nts.NewSessionWithOptions(host, opt)
 
 // Custom dialer
-func dial(network, addr string) (*tls.Conn, error) {
+func dialer(network, addr string) (*tls.Conn, error) {
     // custom logic to dial address
 }
 opt := &nts.SessionOptions{
-    Dial: dial,
+    Dialer: dialer,
+    // If the dialer connects to a proxy before the NTP server the NTP address
+    // will need to be overriden
+    NTPAddr: net.JoinHostPort(host, strconv.Itoa(port)),
 }
 session, err := nts.NewSessionWithOptions(host, opt)
 ```
