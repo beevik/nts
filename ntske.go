@@ -172,7 +172,7 @@ loop:
 			s.ntpAddr = string(rbody)
 
 		case recPort:
-			if len(rbody) != 2 || critical {
+			if len(rbody) != 2 {
 				return ErrKeyExchangeFailed
 			}
 			port = int(binary.BigEndian.Uint16(rbody))
