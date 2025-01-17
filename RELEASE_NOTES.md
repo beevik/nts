@@ -1,3 +1,10 @@
+Release v0.2.1
+==============
+
+**Fixes**
+
+* Fixed a bug that was causing some key exhanges to fail.
+
 Release v0.2.0
 ==============
 
