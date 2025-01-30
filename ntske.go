@@ -176,6 +176,11 @@ loop:
 				return ErrKeyExchangeFailed
 			}
 			port = int(binary.BigEndian.Uint16(rbody))
+
+		default:
+			if critical {
+				return ErrKeyExchangeFailed
+			}
 		}
 	}
 
