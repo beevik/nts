@@ -16,8 +16,8 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -87,13 +87,14 @@ func NewSession(address string) (*Session, error) {
 // NewSessionWithOptions performs the same function as NewSession but allows
 // for the customization of certain authentication behaviors.
 func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error) {
-	if strings.IndexByte(address, ':') < 0 {
-		address += ":" + strconv.Itoa(defaultNtsPort)
+	ntskeAddr, err := fixHostPort(address, defaultNtsPort)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address: %s", err.Error())
 	}
 
 	s := &Session{
 		options:   *opt,
-		ntskeAddr: address,
+		ntskeAddr: ntskeAddr,
 	}
 
 	if s.options.TLSConfig == nil {
@@ -110,7 +111,7 @@ func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error
 		s.options.Timeout = time.Second * 5
 	}
 
-	err := s.performKeyExchange()
+	err = s.performKeyExchange()
 	if err != nil {
 		return nil, err
 	}
@@ -310,6 +311,46 @@ func (s *Session) processCookies(buf []byte) error {
 		}
 	}
 	return nil
+}
+
+// fixHostPort examines an address in one of the accepted forms and fixes it
+// to include a port number if necessary.
+func fixHostPort(address string, defaultPort int) (fixed string, err error) {
+	if len(address) == 0 {
+		return "", errors.New("address string is empty")
+	}
+
+	// If the address is wrapped in brackets, append a port if necessary.
+	if address[0] == '[' {
+		end := strings.IndexByte(address, ']')
+		switch {
+		case end < 0:
+			return "", errors.New("missing ']' in address")
+		case end+1 == len(address):
+			return fmt.Sprintf("%s:%d", address, defaultPort), nil
+		case address[end+1] == ':':
+			return address, nil
+		default:
+			return "", errors.New("unexpected character following ']' in address")
+		}
+	}
+
+	// No colons? Must be a port-less IPv4 or domain address.
+	last := strings.LastIndexByte(address, ':')
+	if last < 0 {
+		return fmt.Sprintf("%s:%d", address, defaultPort), nil
+	}
+
+	// Exactly one colon? A port have been included along with an IPv4 or
+	// domain address. (IPv6 addresses are guaranteed to have more than one
+	// colon.)
+	prev := strings.LastIndexByte(address[:last], ':')
+	if prev < 0 {
+		return address, nil
+	}
+
+	// Two or more colons means we must have an IPv6 address without a port.
+	return fmt.Sprintf("[%s]:%d", address, defaultPort), nil
 }
 
 func align(slice []byte) []byte {
