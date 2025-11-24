@@ -61,6 +61,24 @@ type SessionOptions struct {
 	// seconds.
 	Timeout time.Duration
 
+	// RequestedNTPServerAddress is the hostname or IP address of the NTPv4
+	// server the client wishes to associate with once the NTS key exchange
+	// has completed. The field must contain a fully qualified domain name, an
+	// IPv4 address in dotted decimal notation, or an IPv6 address conforming
+	// to the "Text Representation of Addresses" as specified in RFC 4291. The
+	// NTS key exchange server's decision to honor this request is optional.
+	// If this field contains the empty string, the server will select the NTP
+	// server the client should use.
+	RequestedNTPServerAddress string
+
+	// RequestedNTPServerPort is the port number of the NTPv4 server with
+	// which the client should associate once the NTS key exchange has
+	// completed. It is used in conjunction with the RequestedNTPServerAddress
+	// option. The NTS key exchange server's decision to honor this request is
+	// optional. If this field contains the value zero, the NTS server will
+	// select the NTP server port the client should use.
+	RequestedNTPServerPort int
+
 	// Dialer is a callback that overrides the default TLS dialer behavior
 	// used to establish a connection with the NTS key exchange endpoint's
 	// network address. The tlsConfig is the TLS configuration used to
