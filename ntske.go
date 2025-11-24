@@ -37,8 +37,8 @@ const (
 	recWarning
 	recAlgorithms
 	recCookie
-	recServer
-	recPort
+	recNegotiatedServer
+	recNegotiatedPort
 
 	recCritical recordType = 0x8000
 )
@@ -64,8 +64,18 @@ func (s *Session) performKeyExchange() error {
 	}
 
 	var xmitBuf bytes.Buffer
+
 	writeRecProtocols(&xmitBuf, ntpProtocolID)
 	writeRecAlgorithms(&xmitBuf, algoAEAD_AES_SIV_CMAC_256)
+
+	if s.options.RequestedNTPServerAddress != "" {
+		writeRecNegotiatedServer(&xmitBuf, s.options.RequestedNTPServerAddress)
+	}
+
+	if s.options.RequestedNTPServerPort != 0 {
+		writeRecNegotiatedPort(&xmitBuf, uint16(s.options.RequestedNTPServerPort))
+	}
+
 	writeRecEOM(&xmitBuf)
 
 	_, err = conn.Write(xmitBuf.Bytes())
@@ -165,13 +175,13 @@ loop:
 			copy(cookie, rbody)
 			s.cookies.Add(cookie)
 
-		case recServer:
+		case recNegotiatedServer:
 			if len(rbody) == 0 {
 				return ErrKeyExchangeFailed
 			}
 			s.ntpAddr = string(rbody)
 
-		case recPort:
+		case recNegotiatedPort:
 			if len(rbody) != 2 {
 				return ErrKeyExchangeFailed
 			}
@@ -230,6 +240,18 @@ func writeRecAlgorithms(w io.Writer, algo uint16) {
 	binary.Write(w, binary.BigEndian, recAlgorithms|recCritical)
 	binary.Write(w, binary.BigEndian, uint16(2))
 	binary.Write(w, binary.BigEndian, algo)
+}
+
+func writeRecNegotiatedServer(w io.Writer, addr string) {
+	binary.Write(w, binary.BigEndian, recNegotiatedServer)
+	binary.Write(w, binary.BigEndian, uint16(len(addr)))
+	w.Write([]byte(addr))
+}
+
+func writeRecNegotiatedPort(w io.Writer, port uint16) {
+	binary.Write(w, binary.BigEndian, recNegotiatedPort)
+	binary.Write(w, binary.BigEndian, uint16(2))
+	binary.Write(w, binary.BigEndian, port)
 }
 
 func writeRecEOM(w io.Writer) {
