@@ -99,9 +99,6 @@ loop:
 		rtype := recordType(binary.BigEndian.Uint16(rhdr[0:2]))
 		critical := (rtype & recCritical) != 0
 		rtype &= ^recCritical
-		if rtype > 7 {
-			return ErrKeyExchangeFailed
-		}
 
 		rlen := int(binary.BigEndian.Uint16(rhdr[2:4]))
 		if rlen > len(recvBuf) {
