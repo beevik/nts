@@ -1,4 +1,4 @@
-// Copyright © 2023 Brett Vickers.
+// Copyright © Brett Vickers.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -91,6 +91,30 @@ type SessionOptions struct {
 	// function is expected to return a "host:port" address to override this
 	// address. This option is commonly used in proxy setups.
 	Resolver func(addr string) string
+
+	// AssumeCompliant128GCM determines whether the client should assume the
+	// NTS key exchange server implements a default-compliant use of the
+	// AES-128-GCM-SIV algorithm. At the present time, only chrony supports
+	// this algorithm, but it was introduced with a bug that caused it to use
+	// the wrong algorithm ID when generating keys. Version 4.6.1 introduced a
+	// workaround for this issue by adding a new key-exchange record to
+	// negotiate the use of compliant AES-128-GCM-SIV.
+	//
+	// Setting this option to false (the default) causes the client to assume
+	// a non-compliant server and to attempt negotation of compliant
+	// AES-128-GCM-SIV behavior during key exchange. Setting this option to
+	// false is necessary when communicating with chrony servers until all of
+	// them have migrated to a default-compliant AES-128-GCM-SIV behavior.
+	//
+	// Setting this option to true causes the client to assume the server
+	// implements a default-compliant AES-128-GCM-SIV behavior without
+	// exchanging any additional records. This should only be done when the
+	// client is sure the server implements default-compliant AES-128-GCM-SIV
+	// behavior.
+	//
+	// For further details, see:
+	// https://chrony-project.org/doc/spec/nts-compliant-128gcm.html
+	AssumeCompliant128GCM bool
 }
 
 // NewSession creates an NTS session by connecting to an NTS key-exchange
