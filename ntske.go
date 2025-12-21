@@ -28,7 +28,10 @@ const (
 	algoAEAD_AES_128_GCM_SIV  = uint16(30)
 )
 
-var ErrKeyExchangeFailed = errors.New("key exchange failure")
+var (
+	errInvalidRecordSize  = errors.New("key exchange: invalid record size")
+	errInvalidCriticalBit = errors.New("key exchange: incorrect critical bit")
+)
 
 type recordType uint16
 type newAEAD func(key []byte) (cipher.AEAD, error)
@@ -61,14 +64,14 @@ func (s *Session) performKeyExchange() error {
 	// Open a connection to the NTS-KE server.
 	conn, err := dialer("tcp", s.ntskeAddr, s.options.TLSConfig)
 	if err != nil {
-		return fmt.Errorf("key exchange failure: %s", err.Error())
+		return fmt.Errorf("key exchange: connection error: %w", err)
 	}
 	defer conn.Close()
 
 	// Verify that the negotiated protocol is NTS-KE.
 	state := conn.ConnectionState()
 	if state.NegotiatedProtocol != ntskeProtocol {
-		return ErrKeyExchangeFailed
+		return errors.New("key exchange: NTS-KE protocol not negotiated")
 	}
 
 	// Build the NTS-KE request by writing records into a buffer.
@@ -93,7 +96,7 @@ func (s *Session) performKeyExchange() error {
 	// Send the NTS-KE request to the server.
 	_, err = conn.Write(xmitBuf.Bytes())
 	if err != nil {
-		return fmt.Errorf("key exchange failure: %s", err.Error())
+		return fmt.Errorf("key exchange: connection error: %w", err)
 	}
 
 	// Read the NTS-KE response.
@@ -113,7 +116,7 @@ loop:
 		rhdr := recvBuf[:4]
 		_, err := io.ReadFull(recvReader, rhdr)
 		if err != nil {
-			return ErrKeyExchangeFailed
+			return errors.New("key exchange: failed to read record header")
 		}
 
 		// Parse the record type, extracting the critical bit.
@@ -124,71 +127,71 @@ loop:
 		// Parse the record length.
 		rlen := int(binary.BigEndian.Uint16(rhdr[2:4]))
 		if rlen > len(recvBuf) {
-			return ErrKeyExchangeFailed
+			return errors.New("key exchange: record length too large")
 		}
 
 		// Read the record body.
 		rbody := recvBuf[:rlen]
 		_, err = io.ReadFull(recvReader, rbody)
 		if err != nil {
-			return ErrKeyExchangeFailed
+			return errors.New("key exchange: failed to read record")
 		}
 
 		// Process the record body based on its type.
 		switch rtype {
 		case recEOM:
 			if !critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 			if len(rbody) != 0 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			break loop
 
 		case recProtocols:
 			if !critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 			if len(rbody) != 2 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			p := binary.BigEndian.Uint16(rbody)
 			if p != ntpProtocolID {
-				return ErrKeyExchangeFailed
+				return errors.New("key exchange: NTP protocol not supported")
 			}
 
 		case recError:
 			if !critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 			if len(rbody) != 2 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			e := binary.BigEndian.Uint16(rbody)
-			return fmt.Errorf("key exchange failure: error 0x%02x", e)
+			return fmt.Errorf("key exchange: server error (0x%02x)", e)
 
 		case recWarning:
 			if !critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 			if len(rbody) != 2 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			w := binary.BigEndian.Uint16(rbody)
-			return fmt.Errorf("key exchange failure: warning 0x%02x", w)
+			return fmt.Errorf("key exchange: server warning (0x%02x)", w)
 
 		case recAlgorithms:
 			if len(rbody) != 2 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			algorithm = binary.BigEndian.Uint16(rbody)
 
 		case recCookie:
 			if critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 			if len(rbody) == 0 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			cookie := make([]byte, len(rbody))
 			copy(cookie, rbody)
@@ -196,28 +199,28 @@ loop:
 
 		case recNegotiatedServer:
 			if len(rbody) == 0 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			s.ntpAddr = string(rbody)
 
 		case recNegotiatedPort:
 			if len(rbody) != 2 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			port = int(binary.BigEndian.Uint16(rbody))
 
 		case recCompliant128GCM:
 			if critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 			if len(rbody) != 0 {
-				return ErrKeyExchangeFailed
+				return errInvalidRecordSize
 			}
 			useCompliant128GCM = true
 
 		default:
 			if critical {
-				return ErrKeyExchangeFailed
+				return errInvalidCriticalBit
 			}
 		}
 	}
@@ -252,7 +255,7 @@ loop:
 		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, 32, siv.NewCMAC)
 
 	default:
-		return ErrKeyExchangeFailed
+		return errors.New("key exchange: no supported algorithm negotiated")
 	}
 }
 
@@ -307,23 +310,23 @@ func (s *Session) extractKeys(conn *tls.Conn, algorithmID uint16, keyLength int,
 	context[4] = c2sIndicator
 	c2s, err := state.ExportKeyingMaterial(keyLabel, context, keyLength)
 	if err != nil {
-		return err
+		return fmt.Errorf("key exchange: failed to export keying material: %w", err)
 	}
 
 	s.cipherC2S, err = aead(c2s)
 	if err != nil {
-		return ErrKeyExchangeFailed
+		return fmt.Errorf("key exchange: failed to create c2s cipher: %w", err)
 	}
 
 	context[4] = s2cIndicator
 	s2c, err := state.ExportKeyingMaterial(keyLabel, context, keyLength)
 	if err != nil {
-		return err
+		return fmt.Errorf("key exchange: failed to export keying material: %w", err)
 	}
 
 	s.cipherS2C, err = aead(s2c)
 	if err != nil {
-		return ErrKeyExchangeFailed
+		return fmt.Errorf("key exchange: failed to create s2c cipher: %w", err)
 	}
 
 	return nil
