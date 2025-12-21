@@ -396,26 +396,29 @@ func fixHostPort(address string, defaultPort int) (fixed string, err error) {
 }
 
 func align(slice []byte) []byte {
-	// If the slice is already 8-byte aligned, simply return it.
+	// If the slice is already 8-byte aligned and a multiple of 8 bytes in
+	// length, simply return it.
 	ptr := uintptr(unsafe.Pointer(&slice[0]))
-	if (ptr & uintptr(7)) == 0 {
+	if ptr&uintptr(7) == 0 && len(slice)&7 == 0 {
 		return slice
 	}
 
-	// The slice was unaligned, so allocate an aligned buffer and copy the
-	// data into it.
+	// Allocate an aligned buffer and copy the data into it.
 	buf := allocAligned(len(slice))
 	copy(buf, slice)
 	return buf
 }
 
 func allocAligned(size int) []byte {
-	// Try allocating a slice of the requested size. If the result is 8-byte
+	// Pad the buffer size to a multiple of 8 bytes.
+	paddedSize := (size + 7) & ^7
+
+	// Try allocating a slice of the padded size. If the result is 8-byte
 	// aligned, we're done.
-	buf := make([]byte, size)
+	buf := make([]byte, paddedSize)
 	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	if (ptr & uintptr(7)) == 0 {
-		return buf
+	if ptr&uintptr(7) == 0 {
+		return buf[:size]
 	}
 
 	// Given the way the underlying go slice allocator works, this line of
@@ -423,7 +426,7 @@ func allocAligned(size int) []byte {
 
 	// Allocate a buffer slightly larger than requested and return a sub-slice
 	// that is guaranteed to be aligned.
-	buf = make([]byte, size+7)
+	buf = make([]byte, paddedSize+7)
 	ptr = uintptr(unsafe.Pointer(&buf[0]))
 	offset := (8 - int(ptr&uintptr(7))) & 7
 	return buf[offset : offset+size]
