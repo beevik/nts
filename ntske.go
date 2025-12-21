@@ -1,4 +1,4 @@
-// Copyright © 2023 Brett Vickers.
+// Copyright © Brett Vickers.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,6 +7,7 @@ package nts
 import (
 	"bufio"
 	"bytes"
+	"crypto/cipher"
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
@@ -24,27 +25,32 @@ const (
 	defaultNtpPort            = 123
 	ntpProtocolID             = uint16(0)
 	algoAEAD_AES_SIV_CMAC_256 = uint16(15)
+	algoAEAD_AES_128_GCM_SIV  = uint16(30)
 )
 
 var ErrKeyExchangeFailed = errors.New("key exchange failure")
 
 type recordType uint16
+type newAEAD func(key []byte) (cipher.AEAD, error)
 
 const (
-	recEOM recordType = 0 + iota
-	recProtocols
-	recError
-	recWarning
-	recAlgorithms
-	recCookie
-	recNegotiatedServer
-	recNegotiatedPort
+	recEOM              recordType = 0
+	recProtocols        recordType = 1
+	recError            recordType = 2
+	recWarning          recordType = 3
+	recAlgorithms       recordType = 4
+	recCookie           recordType = 5
+	recNegotiatedServer recordType = 6
+	recNegotiatedPort   recordType = 7
+	recCompliant128GCM  recordType = 1024
 
 	recCritical recordType = 0x8000
 )
 
 func (s *Session) performKeyExchange() error {
 	dialer := s.options.Dialer
+
+	// Use the default TLS dialer if none was provided.
 	if dialer == nil {
 		dialer = func(network, addr string, tlsConfig *tls.Config) (*tls.Conn, error) {
 			d := &net.Dialer{Timeout: s.options.Timeout}
@@ -52,120 +58,136 @@ func (s *Session) performKeyExchange() error {
 		}
 	}
 
+	// Open a connection to the NTS-KE server.
 	conn, err := dialer("tcp", s.ntskeAddr, s.options.TLSConfig)
 	if err != nil {
 		return fmt.Errorf("key exchange failure: %s", err.Error())
 	}
 	defer conn.Close()
 
+	// Verify that the negotiated protocol is NTS-KE.
 	state := conn.ConnectionState()
 	if state.NegotiatedProtocol != ntskeProtocol {
 		return ErrKeyExchangeFailed
 	}
 
+	// Build the NTS-KE request by writing records into a buffer.
 	var xmitBuf bytes.Buffer
+	{
+		writeRecProtocols(&xmitBuf, ntpProtocolID)
 
-	writeRecProtocols(&xmitBuf, ntpProtocolID)
-	writeRecAlgorithms(&xmitBuf, algoAEAD_AES_SIV_CMAC_256)
+		writeRecAlgorithms(&xmitBuf, algoAEAD_AES_128_GCM_SIV, algoAEAD_AES_SIV_CMAC_256)
+		writeRecCompliantAes128GcmSiv(&xmitBuf)
 
-	if s.options.RequestedNTPServerAddress != "" {
-		writeRecNegotiatedServer(&xmitBuf, s.options.RequestedNTPServerAddress)
+		if s.options.RequestedNTPServerAddress != "" {
+			writeRecNegotiatedServer(&xmitBuf, s.options.RequestedNTPServerAddress)
+		}
+
+		if s.options.RequestedNTPServerPort != 0 {
+			writeRecNegotiatedPort(&xmitBuf, uint16(s.options.RequestedNTPServerPort))
+		}
+
+		writeRecEOM(&xmitBuf)
 	}
 
-	if s.options.RequestedNTPServerPort != 0 {
-		writeRecNegotiatedPort(&xmitBuf, uint16(s.options.RequestedNTPServerPort))
-	}
-
-	writeRecEOM(&xmitBuf)
-
+	// Send the NTS-KE request to the server.
 	_, err = conn.Write(xmitBuf.Bytes())
 	if err != nil {
 		return fmt.Errorf("key exchange failure: %s", err.Error())
 	}
 
+	// Read the NTS-KE response.
 	recvReader := bufio.NewReader(conn)
 	recvBuf := make([]byte, 1024)
 
+	useCompliant128GCM := s.options.AssumeCompliant128GCM
+
 	s.ntpAddr = ""
-	port := 0
+	var port int
+	var algorithm uint16
+
+	// Parse the NTS-KE response records.
 loop:
 	for {
+		// Retrieve the record header (type + length).
 		rhdr := recvBuf[:4]
 		_, err := io.ReadFull(recvReader, rhdr)
 		if err != nil {
 			return ErrKeyExchangeFailed
 		}
 
+		// Parse the record type, extracting the critical bit.
 		rtype := recordType(binary.BigEndian.Uint16(rhdr[0:2]))
 		critical := (rtype & recCritical) != 0
 		rtype &= ^recCritical
 
+		// Parse the record length.
 		rlen := int(binary.BigEndian.Uint16(rhdr[2:4]))
 		if rlen > len(recvBuf) {
 			return ErrKeyExchangeFailed
 		}
 
+		// Read the record body.
 		rbody := recvBuf[:rlen]
 		_, err = io.ReadFull(recvReader, rbody)
 		if err != nil {
 			return ErrKeyExchangeFailed
 		}
 
+		// Process the record body based on its type.
 		switch rtype {
 		case recEOM:
-			if len(rbody) != 0 || !critical {
+			if !critical {
+				return ErrKeyExchangeFailed
+			}
+			if len(rbody) != 0 {
 				return ErrKeyExchangeFailed
 			}
 			break loop
 
 		case recProtocols:
-			if len(rbody) < 2 || (len(rbody)%2) != 0 || !critical {
+			if !critical {
 				return ErrKeyExchangeFailed
 			}
-			found := false
-			for i := 0; i < len(rbody); i += 2 {
-				id := binary.BigEndian.Uint16(rbody[i:])
-				if id == ntpProtocolID {
-					found = true
-					break
-				}
+			if len(rbody) != 2 {
+				return ErrKeyExchangeFailed
 			}
-			if !found {
+			p := binary.BigEndian.Uint16(rbody)
+			if p != ntpProtocolID {
 				return ErrKeyExchangeFailed
 			}
 
 		case recError:
-			if len(rbody) < 2 || (len(rbody)%2) != 0 || !critical {
+			if !critical {
+				return ErrKeyExchangeFailed
+			}
+			if len(rbody) != 2 {
 				return ErrKeyExchangeFailed
 			}
 			e := binary.BigEndian.Uint16(rbody)
 			return fmt.Errorf("key exchange failure: error 0x%02x", e)
 
 		case recWarning:
-			if len(rbody) < 2 || (len(rbody)%2) != 0 || !critical {
+			if !critical {
+				return ErrKeyExchangeFailed
+			}
+			if len(rbody) != 2 {
 				return ErrKeyExchangeFailed
 			}
 			w := binary.BigEndian.Uint16(rbody)
 			return fmt.Errorf("key exchange failure: warning 0x%02x", w)
 
 		case recAlgorithms:
-			if len(rbody) < 2 || (len(rbody)%2) != 0 {
+			if len(rbody) != 2 {
 				return ErrKeyExchangeFailed
 			}
-			found := false
-			for i := 0; i < len(rbody); i += 2 {
-				a := binary.BigEndian.Uint16(rbody[i:])
-				if a == algoAEAD_AES_SIV_CMAC_256 {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return ErrKeyExchangeFailed
-			}
+			algorithm = binary.BigEndian.Uint16(rbody)
 
 		case recCookie:
-			if len(rbody) == 0 || critical {
+			if critical {
+				return ErrKeyExchangeFailed
+			}
+			if len(rbody) == 0 {
 				return ErrKeyExchangeFailed
 			}
 			cookie := make([]byte, len(rbody))
@@ -184,6 +206,15 @@ loop:
 			}
 			port = int(binary.BigEndian.Uint16(rbody))
 
+		case recCompliant128GCM:
+			if critical {
+				return ErrKeyExchangeFailed
+			}
+			if len(rbody) != 0 {
+				return ErrKeyExchangeFailed
+			}
+			useCompliant128GCM = true
+
 		default:
 			if critical {
 				return ErrKeyExchangeFailed
@@ -191,16 +222,17 @@ loop:
 		}
 	}
 
-	// Use the NTS host for NTP if no server record was reported.
+	// Use the NTS host for NTP if no negotiated server record was reported.
 	if s.ntpAddr == "" {
 		s.ntpAddr, _, _ = net.SplitHostPort(conn.RemoteAddr().String())
 	}
 
-	// Use the default NTP port if no port was reported.
+	// Use the default NTP port if no negotiated port was reported.
 	if port == 0 {
 		port = defaultNtpPort
 	}
 
+	// Form the host:port NTP server address string.
 	s.ntpAddr = net.JoinHostPort(s.ntpAddr, strconv.Itoa(port))
 
 	// If the NTP address override resolver is defined, call it.
@@ -208,23 +240,20 @@ loop:
 		s.ntpAddr = s.options.Resolver(s.ntpAddr)
 	}
 
-	// Extract encryption keys from the TLS connection.
-	keyC2S, keyS2C, err := extractKeys(conn, algoAEAD_AES_SIV_CMAC_256)
-	if err != nil {
-		return fmt.Errorf("key exchange failure: %s", err.Error())
-	}
+	// Extract TLS keys and use them to generate AEAD ciphers.
+	switch algorithm {
+	case algoAEAD_AES_128_GCM_SIV:
+		if useCompliant128GCM {
+			return s.extractKeys(conn, algoAEAD_AES_128_GCM_SIV, 16, siv.NewGCM)
+		}
+		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, 16, siv.NewGCM)
 
-	// Create AEAD ciphers from the keys.
-	s.cipherC2S, err = siv.NewCMAC(keyC2S)
-	if err != nil {
+	case algoAEAD_AES_SIV_CMAC_256:
+		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, 32, siv.NewCMAC)
+
+	default:
 		return ErrKeyExchangeFailed
 	}
-	s.cipherS2C, err = siv.NewCMAC(keyS2C)
-	if err != nil {
-		return ErrKeyExchangeFailed
-	}
-
-	return nil
 }
 
 func writeRecProtocols(w io.Writer, id uint16) {
@@ -233,10 +262,16 @@ func writeRecProtocols(w io.Writer, id uint16) {
 	binary.Write(w, binary.BigEndian, id)
 }
 
-func writeRecAlgorithms(w io.Writer, algo uint16) {
+func writeRecAlgorithms(w io.Writer, algo1, algo2 uint16) {
 	binary.Write(w, binary.BigEndian, recAlgorithms|recCritical)
-	binary.Write(w, binary.BigEndian, uint16(2))
-	binary.Write(w, binary.BigEndian, algo)
+	binary.Write(w, binary.BigEndian, uint16(4))
+	binary.Write(w, binary.BigEndian, algo1)
+	binary.Write(w, binary.BigEndian, algo2)
+}
+
+func writeRecCompliantAes128GcmSiv(w io.Writer) {
+	binary.Write(w, binary.BigEndian, recCompliant128GCM)
+	binary.Write(w, binary.BigEndian, uint16(0))
 }
 
 func writeRecNegotiatedServer(w io.Writer, addr string) {
@@ -256,31 +291,40 @@ func writeRecEOM(w io.Writer) {
 	binary.Write(w, binary.BigEndian, uint16(0))
 }
 
-func extractKeys(conn *tls.Conn, algorithm uint16) (c2s, s2c []byte, err error) {
+func (s *Session) extractKeys(conn *tls.Conn, algorithmID uint16, keyLength int, aead newAEAD) error {
 	const (
 		keyLabel     = "EXPORTER-network-time-security"
-		keyLength    = 32
 		c2sIndicator = 0
 		s2cIndicator = 1
 	)
 
 	context := make([]byte, 5)
 	binary.BigEndian.PutUint16(context[0:2], ntpProtocolID)
-	binary.BigEndian.PutUint16(context[2:4], algorithm)
+	binary.BigEndian.PutUint16(context[2:4], algorithmID)
 
 	state := conn.ConnectionState()
 
 	context[4] = c2sIndicator
-	c2s, err = state.ExportKeyingMaterial(keyLabel, context, keyLength)
+	c2s, err := state.ExportKeyingMaterial(keyLabel, context, keyLength)
 	if err != nil {
-		return nil, nil, err
+		return err
+	}
+
+	s.cipherC2S, err = aead(c2s)
+	if err != nil {
+		return ErrKeyExchangeFailed
 	}
 
 	context[4] = s2cIndicator
-	s2c, err = state.ExportKeyingMaterial(keyLabel, context, keyLength)
+	s2c, err := state.ExportKeyingMaterial(keyLabel, context, keyLength)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
-	return c2s, s2c, nil
+	s.cipherS2C, err = aead(s2c)
+	if err != nil {
+		return ErrKeyExchangeFailed
+	}
+
+	return nil
 }
