@@ -18,12 +18,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/beevik/ntp"
 )
+
+var alignMemory = runtime.GOARCH == "amd64"
 
 var (
 	ErrAuthFailedOnClient = errors.New("authentication failed on client")
@@ -306,10 +309,11 @@ func (s *Session) processResponse(buf []byte) error {
 			}
 
 			// NOTE: The siv-go package has an undocumented issue where all
-			// memory accesses must be 8-byte aligned or else it segfaults. To
-			// prevent this, check if the nonce and ciphertext within the
-			// packet are memory aligned, and if not, copy them into aligned
-			// buffers before decrypting and authenticating.
+			// memory accesses on the amd64 architecture must be 8-byte
+			// aligned or else it segfaults. To prevent this, check if the
+			// nonce and ciphertext within the packet are memory aligned, and
+			// if not, copy them into aligned buffers before decrypting and
+			// authenticating.
 			ptr := body[4:]
 			nonce := align(ptr[:nonceLen])
 			ptr = ptr[nonceLenPadded:]
@@ -396,6 +400,11 @@ func fixHostPort(address string, defaultPort int) (fixed string, err error) {
 }
 
 func align(slice []byte) []byte {
+	// Alignment only required on amd64, which uses SIMD operations.
+	if !alignMemory {
+		return slice
+	}
+
 	// If the slice is already 8-byte aligned and a multiple of 8 bytes in
 	// length, simply return it.
 	ptr := uintptr(unsafe.Pointer(&slice[0]))
@@ -410,6 +419,11 @@ func align(slice []byte) []byte {
 }
 
 func allocAligned(size int) []byte {
+	// Alignment only required on amd64, which uses SIMD operations.
+	if !alignMemory {
+		return make([]byte, size)
+	}
+
 	// Pad the buffer size to a multiple of 8 bytes.
 	paddedSize := (size + 7) & ^7
 
