@@ -37,15 +37,15 @@ type recordType uint16
 type newAEAD func(key []byte) (cipher.AEAD, error)
 
 const (
-	recEOM              recordType = 0
-	recProtocols        recordType = 1
-	recError            recordType = 2
-	recWarning          recordType = 3
-	recAlgorithms       recordType = 4
-	recCookie           recordType = 5
-	recNegotiatedServer recordType = 6
-	recNegotiatedPort   recordType = 7
-	recCompliant128GCM  recordType = 1024
+	recEOM             recordType = 0
+	recProtocols       recordType = 1
+	recError           recordType = 2
+	recWarning         recordType = 3
+	recAlgorithms      recordType = 4
+	recCookie          recordType = 5
+	recServer          recordType = 6
+	recPort            recordType = 7
+	recCompliant128GCM recordType = 1024
 
 	recCritical recordType = 0x8000
 )
@@ -83,11 +83,11 @@ func (s *Session) performKeyExchange() error {
 		writeRecCompliantAes128GcmSiv(&xmitBuf)
 
 		if s.options.RequestedNTPServerAddress != "" {
-			writeRecNegotiatedServer(&xmitBuf, s.options.RequestedNTPServerAddress)
+			writeRecServer(&xmitBuf, s.options.RequestedNTPServerAddress)
 		}
 
 		if s.options.RequestedNTPServerPort != 0 {
-			writeRecNegotiatedPort(&xmitBuf, uint16(s.options.RequestedNTPServerPort))
+			writeRecPort(&xmitBuf, uint16(s.options.RequestedNTPServerPort))
 		}
 
 		writeRecEOM(&xmitBuf)
@@ -152,6 +152,9 @@ loop:
 			if !critical {
 				return errInvalidCriticalBit
 			}
+			if len(rbody) == 0 {
+				return errors.New("key exchange: NTP protocol not supported")
+			}
 			if len(rbody) != 2 {
 				return errInvalidRecordSize
 			}
@@ -167,8 +170,8 @@ loop:
 			if len(rbody) != 2 {
 				return errInvalidRecordSize
 			}
-			e := binary.BigEndian.Uint16(rbody)
-			return fmt.Errorf("key exchange: server error (0x%02x)", e)
+			code := binary.BigEndian.Uint16(rbody)
+			return processErrorCode(code)
 
 		case recWarning:
 			if !critical {
@@ -177,10 +180,14 @@ loop:
 			if len(rbody) != 2 {
 				return errInvalidRecordSize
 			}
-			w := binary.BigEndian.Uint16(rbody)
-			return fmt.Errorf("key exchange: server warning (0x%02x)", w)
+			// Currently, no warning codes are defined in RFC 8915.
+			code := binary.BigEndian.Uint16(rbody)
+			return fmt.Errorf("key exchange: unrecognized warning code (0x%02x)", code)
 
 		case recAlgorithms:
+			if len(rbody) == 0 {
+				return errors.New("key exchange: server does not support requested algorithms")
+			}
 			if len(rbody) != 2 {
 				return errInvalidRecordSize
 			}
@@ -197,13 +204,13 @@ loop:
 			copy(cookie, rbody)
 			s.cookies.Add(cookie)
 
-		case recNegotiatedServer:
+		case recServer:
 			if len(rbody) == 0 {
 				return errInvalidRecordSize
 			}
 			s.ntpAddr = string(rbody)
 
-		case recNegotiatedPort:
+		case recPort:
 			if len(rbody) != 2 {
 				return errInvalidRecordSize
 			}
@@ -277,14 +284,14 @@ func writeRecCompliantAes128GcmSiv(w io.Writer) {
 	binary.Write(w, binary.BigEndian, uint16(0))
 }
 
-func writeRecNegotiatedServer(w io.Writer, addr string) {
-	binary.Write(w, binary.BigEndian, recNegotiatedServer)
+func writeRecServer(w io.Writer, addr string) {
+	binary.Write(w, binary.BigEndian, recServer)
 	binary.Write(w, binary.BigEndian, uint16(len(addr)))
 	w.Write([]byte(addr))
 }
 
-func writeRecNegotiatedPort(w io.Writer, port uint16) {
-	binary.Write(w, binary.BigEndian, recNegotiatedPort)
+func writeRecPort(w io.Writer, port uint16) {
+	binary.Write(w, binary.BigEndian, recPort)
 	binary.Write(w, binary.BigEndian, uint16(2))
 	binary.Write(w, binary.BigEndian, port)
 }
@@ -292,6 +299,19 @@ func writeRecNegotiatedPort(w io.Writer, port uint16) {
 func writeRecEOM(w io.Writer) {
 	binary.Write(w, binary.BigEndian, recEOM|recCritical)
 	binary.Write(w, binary.BigEndian, uint16(0))
+}
+
+func processErrorCode(code uint16) error {
+	switch code {
+	case 0:
+		return errors.New("key exchange: unrecognized critical record")
+	case 1:
+		return errors.New("key exchange: bad request")
+	case 2:
+		return errors.New("key exchange: internal server error")
+	default:
+		return fmt.Errorf("key exchange: unrecognized server error code (0x%02x)", code)
+	}
 }
 
 func (s *Session) extractKeys(conn *tls.Conn, algorithmID uint16, keyLength int, aead newAEAD) error {
