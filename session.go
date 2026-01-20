@@ -268,8 +268,9 @@ func (s *Session) processResponse(buf []byte) error {
 	}()
 
 	// Check the NTP header for a crypto-NAK kiss-of-death.
+	version := int((buf[0] >> 3) & 0x7)
 	stratum := buf[1]
-	if stratum == 0 {
+	if stratum == 0 && version <= 4 {
 		kissCode := binary.BigEndian.Uint32(buf[12:])
 		if kissCode == cryptoNAK {
 			return ErrAuthFailedOnServer
@@ -278,16 +279,16 @@ func (s *Session) processResponse(buf []byte) error {
 
 	// Process all NTS extension fields.
 	offset := ntpHeaderLen
-	cur := buf[offset:]
-	for len(cur) >= 4 {
-		xtype := extType(binary.BigEndian.Uint16(cur[0:2]))
-		xlen := int(binary.BigEndian.Uint16(cur[2:4]))
-		if len(cur) < xlen {
+	curr := buf[offset:]
+	for len(curr) >= 4 {
+		xtype := extType(binary.BigEndian.Uint16(curr[0:2]))
+		xlen := int(binary.BigEndian.Uint16(curr[2:4]))
+		if len(curr) < xlen {
 			return ErrInvalidFormat
 		}
 
-		body := cur[4:xlen]
-		cur = cur[xlen:]
+		body := curr[4:xlen]
+		plen := paddedLen(xlen)
 
 		switch xtype {
 		case extUniqueID:
@@ -333,7 +334,9 @@ func (s *Session) processResponse(buf []byte) error {
 			}
 		}
 
-		offset += xlen
+		offset += plen
+		curr = buf[offset:]
+
 	}
 
 	return nil

@@ -5,7 +5,8 @@
 package nts
 
 import (
-	"net"
+	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -31,24 +32,37 @@ func TestOnlineSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	host, port, err := net.SplitHostPort(s.Address())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("NTP host: %s\n", host)
-	t.Logf("NTP port: %s\n", port)
-
 	const iterations = 10
 	var minPoll = 10 * time.Second
 	for i := 1; i <= iterations; i++ {
-		r, err := s.Query()
+		opt := ntp.QueryOptions{
+			Version:                  5,
+			Timescale:                ntp.TimescaleUTC,
+			AdditionalTimescales:     []ntp.Timescale{ntp.TimescaleTAI, ntp.TimescaleUT1, ntp.TimescaleUTCSmeared},
+			RequestSupportedVersions: true,
+			RequestCorrection:        false,
+			RequestReferenceTime:     true,
+			RequestMonotonic:         true,
+			RequestInterleavedMode:   true,
+			RequestReferenceID: ntp.ReferenceIDRequest{
+				ChunkOffset: 0,
+				ChunkSize:   uint16(512),
+			},
+		}
+
+		r, err := s.QueryWithOptions(&opt)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		t.Log(strings.Repeat("=", 48))
 		t.Logf("Query %d of %d\n", i, iterations)
-		logResponse(t, r)
+		t.Log(strings.Repeat("=", 48))
+
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "\n\n    Address: %v\n", s.Address())
+		r.Log(&buf)
+		t.Log(buf.String() + "\n")
 
 		wait := r.Poll
 		if wait < minPoll {
@@ -60,33 +74,4 @@ func TestOnlineSession(t *testing.T) {
 			time.Sleep(wait)
 		}
 	}
-}
-
-func logResponse(t *testing.T, r *ntp.Response) {
-	const timeFormat = "Mon Jan _2 2006  15:04:05.00000000 (MST)"
-
-	now := time.Now()
-	t.Logf("[%s] ClockOffset: %s", host, r.ClockOffset)
-	t.Logf("[%s]  SystemTime: %s", host, now.Format(timeFormat))
-	t.Logf("[%s]   ~TrueTime: %s", host, now.Add(r.ClockOffset).Format(timeFormat))
-	t.Logf("[%s]    XmitTime: %s", host, r.Time.Format(timeFormat))
-	t.Logf("[%s]     Stratum: %d", host, r.Stratum)
-	t.Logf("[%s]       RefID: %s (0x%08x)", host, r.ReferenceString(), r.ReferenceID)
-	t.Logf("[%s]     RefTime: %s", host, r.ReferenceTime.Format(timeFormat))
-	t.Logf("[%s]         RTT: %s", host, r.RTT)
-	t.Logf("[%s]        Poll: %s", host, r.Poll)
-	t.Logf("[%s]   Precision: %s", host, r.Precision)
-	t.Logf("[%s]   RootDelay: %s", host, r.RootDelay)
-	t.Logf("[%s]    RootDisp: %s", host, r.RootDispersion)
-	t.Logf("[%s]    RootDist: %s", host, r.RootDistance)
-	t.Logf("[%s]    MinError: %s", host, r.MinError)
-	t.Logf("[%s]        Leap: %d", host, r.Leap)
-	t.Logf("[%s]    KissCode: %s", host, stringOrEmpty(r.KissCode))
-}
-
-func stringOrEmpty(s string) string {
-	if s == "" {
-		return "<empty>"
-	}
-	return s
 }
