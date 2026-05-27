@@ -59,7 +59,11 @@ synchronization data.
 ```go
 response, err := session.Query();
 
-if err == nil { // no error
+if err != nil {
+   // handle error
+}
+
+if response != nil { // no error
     accurateTime := time.Now().Add(response.ClockOffset)
     fmt.Printf("The current time is: %s\n", accurateTime)
 }
