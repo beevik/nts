@@ -57,7 +57,7 @@ After successful establishment of the session, you may issue NTP
 synchronization data.
 
 ```go
-if response, err := session.Query(); err != nil {
+if response, err := session.Query(); err == nil {
     accurateTime := time.Now().Add(response.ClockOffset)
     fmt.Printf("The current time is: %s\n", accurateTime)
 }
