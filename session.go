@@ -282,7 +282,7 @@ func (s *Session) processResponse(buf []byte) error {
 	for len(cur) >= 4 {
 		xtype := extType(binary.BigEndian.Uint16(cur[0:2]))
 		xlen := int(binary.BigEndian.Uint16(cur[2:4]))
-		if len(cur) < xlen {
+		if xlen < 4 || len(cur) < xlen {
 			return ErrInvalidFormat
 		}
 
@@ -343,7 +343,7 @@ func (s *Session) processCookies(buf []byte) error {
 	for len(buf) >= 4 {
 		xtype := extType(binary.BigEndian.Uint16(buf[0:2]))
 		xlen := int(binary.BigEndian.Uint16(buf[2:4]))
-		if len(buf) < xlen {
+		if xlen < 4 || len(buf) < xlen {
 			return ErrInvalidFormat
 		}
 
