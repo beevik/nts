@@ -1,3 +1,18 @@
+Release v0.3.1
+==============
+
+**Changes**
+
+* Improve NTS error code handling by introducing more specific error
+  responses.
+
+**Fixes**
+
+* Fixed a bug that could cause a panic if an invalid NTS extension field
+  length was received.
+* Perform memory alignment operations only on amd64 platforms.
+
+
 Release v0.3.0
 ==============
 
