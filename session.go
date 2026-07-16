@@ -321,7 +321,7 @@ func (s *Session) processResponse(buf []byte) error {
 
 			// Decrypt the ciphertext and authenticate the portion of the
 			// packet appearing before this extension field.
-			plaintext, err := s.cipherS2C.Open(nil, nonce, ciphertext, buf[:offset])
+			plaintext, err := s.cipherS2C.Open(nil, nonce, ciphertext, align(buf[:offset]))
 			if err != nil {
 				return ErrAuthFailedOnClient
 			}
