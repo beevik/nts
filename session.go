@@ -278,10 +278,13 @@ func (s *Session) processResponse(buf []byte) error {
 		isCryptoNAK = kissCode == cryptoNAK
 	}
 
-	// Process all NTS extension fields.
+	// Process all extension fields until the AEAD extension field is
+	// encountered. All fields encountered after the AEAD extension field are
+	// considered unauthenticated and must be discarded according to RFC 8915
+	// section 5.7.
 	offset := ntpHeaderLen
 	cur := buf[offset:]
-	for len(cur) >= 4 {
+	for len(cur) >= 4 && !gotAEAD {
 		xtype := extType(binary.BigEndian.Uint16(cur[0:2]))
 		xlen := int(binary.BigEndian.Uint16(cur[2:4]))
 		if xlen < 4 || len(cur) < xlen {
