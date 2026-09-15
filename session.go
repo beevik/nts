@@ -268,17 +268,17 @@ func (s *Session) processResponse(buf []byte) error {
 		s.uniqueID = nil
 	}()
 
-	// Check the NTP header for a crypto-NAK kiss-of-death.
+	var isCryptoNAK, gotUniqueID, gotAEAD bool
+
+	// Check the NTP header for a crypto-NAK kiss-of-death, but don't act on
+	// it until we've verified the unique ID extension field.
 	stratum := buf[1]
 	if stratum == 0 {
 		kissCode := binary.BigEndian.Uint32(buf[12:])
-		if kissCode == cryptoNAK {
-			return ErrAuthFailedOnServer
-		}
+		isCryptoNAK = kissCode == cryptoNAK
 	}
 
 	// Process all NTS extension fields.
-	var gotUniqueID, gotAEAD bool
 	offset := ntpHeaderLen
 	cur := buf[offset:]
 	for len(cur) >= 4 {
@@ -340,7 +340,13 @@ func (s *Session) processResponse(buf []byte) error {
 		offset += xlen
 	}
 
-	if !gotUniqueID || !gotAEAD {
+	if !gotUniqueID {
+		return ErrMissingExtField
+	}
+	if isCryptoNAK {
+		return ErrAuthFailedOnServer
+	}
+	if !gotAEAD {
 		return ErrMissingExtField
 	}
 
