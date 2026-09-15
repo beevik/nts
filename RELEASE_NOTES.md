@@ -1,3 +1,14 @@
+Release v0.3.2
+==============
+
+**Fixes**
+
+* Validate that NTP responses contain the expected unique ID and AEAD
+  extension fields.
+* Discard unauthenticated extension fields appearing after the AEAD extension
+  field.
+* Ensure that crypto-NAK responses include a valid unique ID.
+
 Release v0.3.1
 ==============
 
