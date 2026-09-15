@@ -34,6 +34,7 @@ var (
 	ErrInvalidFormat      = errors.New("invalid packet format")
 	ErrNoCookies          = errors.New("no NTS cookies available")
 	ErrUniqueIDMismatch   = errors.New("client and server unique ID mismatch")
+	ErrMissingExtField    = errors.New("server response missing a required extension field")
 )
 
 // Session contains the state of an active NTS session. It is initialized by
@@ -277,6 +278,7 @@ func (s *Session) processResponse(buf []byte) error {
 	}
 
 	// Process all NTS extension fields.
+	var gotUniqueID, gotAEAD bool
 	offset := ntpHeaderLen
 	cur := buf[offset:]
 	for len(cur) >= 4 {
@@ -294,6 +296,7 @@ func (s *Session) processResponse(buf []byte) error {
 			if !bytes.Equal(s.uniqueID, body) {
 				return ErrUniqueIDMismatch
 			}
+			gotUniqueID = true
 
 		case extAEAD:
 			if len(body) < 4 {
@@ -331,9 +334,14 @@ func (s *Session) processResponse(buf []byte) error {
 			if err != nil {
 				return err
 			}
+			gotAEAD = true
 		}
 
 		offset += xlen
+	}
+
+	if !gotUniqueID || !gotAEAD {
+		return ErrMissingExtField
 	}
 
 	return nil
