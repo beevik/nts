@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/beevik/ntp"
 )
@@ -89,4 +90,24 @@ func stringOrEmpty(s string) string {
 		return "<empty>"
 	}
 	return s
+}
+
+func TestAlignSatisfiesSIV(t *testing.T) {
+	if !alignMemory {
+		t.Skip("alignment only required on amd64")
+	}
+	backing := make([]byte, 256)
+	base := uintptr(unsafe.Pointer(&backing[0]))
+	for off := uintptr(0); off < 64; off++ {
+		if (base+off)%sivAlignment != 8 {
+			continue
+		}
+		// 8-byte aligned but not 16: the case siv-go faults on.
+		got := align(backing[off : off+72])
+		if p := uintptr(unsafe.Pointer(&got[0])); p%sivAlignment != 0 {
+			t.Fatalf("align returned a buffer at %%%d == %d", sivAlignment, p%sivAlignment)
+		}
+		return
+	}
+	t.Skip("no 8-mod-16 offset in backing array")
 }
