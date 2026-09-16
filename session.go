@@ -28,6 +28,8 @@ import (
 
 var alignMemory = runtime.GOARCH == "amd64"
 
+const alignment = 16
+
 var (
 	ErrAuthFailedOnClient = errors.New("authentication failed on client")
 	ErrAuthFailedOnServer = errors.New("authentication failed on server")
@@ -315,7 +317,7 @@ func (s *Session) processResponse(buf []byte) error {
 			}
 
 			// NOTE: The siv-go package has an undocumented issue where all
-			// memory accesses on the amd64 architecture must be 8-byte
+			// memory accesses on the amd64 architecture must be 16-byte
 			// aligned or else it segfaults. To prevent this, check if the
 			// nonce and ciphertext within the packet are memory aligned, and
 			// if not, copy them into aligned buffers before decrypting and
@@ -422,10 +424,10 @@ func align(slice []byte) []byte {
 		return slice
 	}
 
-	// If the slice is already 8-byte aligned and a multiple of 8 bytes in
-	// length, simply return it.
+	// If the slice is already aligned and a multiple of 16 bytes in length,
+	// simply return it.
 	ptr := uintptr(unsafe.Pointer(&slice[0]))
-	if ptr&uintptr(7) == 0 && len(slice)&7 == 0 {
+	if ptr&uintptr(alignment-1) == 0 && len(slice)&(alignment-1) == 0 {
 		return slice
 	}
 
@@ -441,14 +443,14 @@ func allocAligned(size int) []byte {
 		return make([]byte, size)
 	}
 
-	// Pad the buffer size to a multiple of 8 bytes.
-	paddedSize := (size + 7) & ^7
+	// Pad the buffer size to a multiple of 16 bytes.
+	paddedSize := (size + alignment - 1) & ^(alignment - 1)
 
-	// Try allocating a slice of the padded size. If the result is 8-byte
-	// aligned, we're done.
+	// Try allocating a slice of the padded size. If the result is aligned,
+	// we're done.
 	buf := make([]byte, paddedSize)
 	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	if ptr&uintptr(7) == 0 {
+	if ptr&uintptr(alignment-1) == 0 {
 		return buf[:size]
 	}
 
@@ -457,9 +459,9 @@ func allocAligned(size int) []byte {
 
 	// Allocate a buffer slightly larger than requested and return a sub-slice
 	// that is guaranteed to be aligned.
-	buf = make([]byte, paddedSize+7)
+	buf = make([]byte, paddedSize+alignment-1)
 	ptr = uintptr(unsafe.Pointer(&buf[0]))
-	offset := (8 - int(ptr&uintptr(7))) & 7
+	offset := (alignment - int(ptr&uintptr(alignment-1))) & (alignment - 1)
 	return buf[offset : offset+size]
 }
 

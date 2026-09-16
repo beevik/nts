@@ -5,6 +5,8 @@
 package nts
 
 import (
+	"bytes"
+	"crypto/rand"
 	"net"
 	"os"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/beevik/ntp"
+	"github.com/secure-io/siv-go"
 )
 
 // The NTS key-exchange server to use for online unit tests. May be overridden
@@ -89,4 +92,56 @@ func stringOrEmpty(s string) string {
 		return "<empty>"
 	}
 	return s
+}
+
+func TestSIVAlignment(t *testing.T) {
+	if !alignMemory {
+		t.Skip("alignment only required on amd64")
+	}
+
+	key := make([]byte, 16)
+	_, err := rand.Read(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cipher, err := siv.NewGCM(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 64 {
+		nonceUnaligned := make([]byte, i+cipher.NonceSize())[i:]
+		nonce := align(nonceUnaligned)
+		if _, err := rand.Read(nonce); err != nil {
+			t.Error(err)
+			continue
+		}
+
+		plaintextUnaligned := make([]byte, i+64)[i:]
+		plaintext := align(plaintextUnaligned)
+		if _, err := rand.Read(plaintext); err != nil {
+			t.Error(err)
+			continue
+		}
+
+		additionalDataUnaligned := make([]byte, i+64)[i:]
+		additionalData := align(additionalDataUnaligned)
+		if _, err := rand.Read(additionalData); err != nil {
+			t.Error(err)
+			continue
+		}
+
+		ciphertext := cipher.Seal(nil, nonce, plaintext, additionalData)
+
+		got, err := cipher.Open(nil, nonce, ciphertext, additionalData)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		if !bytes.Equal(got, plaintext) {
+			t.Error("decrypted plaintext doesn't match original")
+			continue
+		}
+	}
 }
