@@ -27,7 +27,8 @@ func init() {
 }
 
 func TestOnlineSession(t *testing.T) {
-	s, err := NewSession(host)
+	sopt := SessionOptions{NTPVersion: 5}
+	s, err := NewSessionWithOptions(host, &sopt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,6 @@ func TestOnlineSession(t *testing.T) {
 	var minPoll = 10 * time.Second
 	for i := 1; i <= iterations; i++ {
 		opt := ntp.QueryOptions{
-			Version:                  5,
 			Timescale:                ntp.TimescaleUTC,
 			AdditionalTimescales:     []ntp.Timescale{ntp.TimescaleTAI, ntp.TimescaleUT1, ntp.TimescaleUTCSmeared},
 			RequestSupportedVersions: true,

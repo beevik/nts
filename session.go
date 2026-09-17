@@ -42,13 +42,14 @@ var (
 // session's internal state is updated as NTP queries are made against an
 // NTS-capable NTP server.
 type Session struct {
-	options   SessionOptions // options provided at session creation time
-	ntskeAddr string         // "host:port" address used for NTS key exchange
-	ntpAddr   string         // "host:port" address to use for NTP service
-	cookies   cookieJar      // container for cookies consumed by NTP queries
-	cipherC2S cipher.AEAD    // client-to-server authentication & encryption
-	cipherS2C cipher.AEAD    // server-to-client authentication & encryption
-	uniqueID  []byte         // most recently transmitted unique ID
+	options     SessionOptions // options provided at session creation time
+	ntskeAddr   string         // "host:port" address used for NTS key exchange
+	ntpAddr     string         // "host:port" address to use for NTP service
+	ntpProtocol int            // NTP protocol version in use (4 or 5)
+	cookies     cookieJar      // container for cookies consumed by NTP queries
+	cipherC2S   cipher.AEAD    // client-to-server authentication & encryption
+	cipherS2C   cipher.AEAD    // server-to-client authentication & encryption
+	uniqueID    []byte         // most recently transmitted unique ID
 }
 
 // SessionOptions contains options for customizing the behavior of an NTS
@@ -63,6 +64,10 @@ type SessionOptions struct {
 	// key exchange server before failing with a timeout error. Defaults to 5
 	// seconds.
 	Timeout time.Duration
+
+	// NTPVersion is the NTP protocol version to request during key exchange.
+	// Must be 4 or 5. Version 5 is considered experimental. Defaults to 4.
+	NTPVersion int
 
 	// RequestedNTPServerAddress is the hostname or IP address of the NTPv4
 	// server the client wishes to associate with once the NTS key exchange
@@ -132,7 +137,7 @@ func NewSession(address string) (*Session, error) {
 // NewSessionWithOptions performs the same function as NewSession but allows
 // for the customization of certain authentication behaviors.
 func NewSessionWithOptions(address string, opt *SessionOptions) (*Session, error) {
-	ntskeAddr, err := fixHostPort(address, defaultNtsPort)
+	ntskeAddr, err := fixHostPort(address, defaultPortNTS)
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %s", err.Error())
 	}
@@ -178,6 +183,7 @@ func (s *Session) Query() (response *ntp.Response, err error) {
 // customization of certain NTP behaviors.
 func (s *Session) QueryWithOptions(opt *ntp.QueryOptions) (response *ntp.Response, err error) {
 	opt.Extensions = append(opt.Extensions, privateWrapper{s})
+	opt.Version = s.ntpProtocol
 	return ntp.QueryWithOptions(s.ntpAddr, *opt)
 }
 
@@ -259,15 +265,19 @@ func (s *Session) processQuery(buf *bytes.Buffer) error {
 
 func (s *Session) processResponse(buf []byte) error {
 	const (
-		cryptoNAK    = 0x4e54534e // Kiss code "NTSN"
-		ntpHeaderLen = 48
+		cryptoNAK = 0x4e54534e // Kiss code "NTSN"
+		msgSize   = 48
 	)
 
 	defer func() {
 		s.uniqueID = nil
 	}()
 
-	// Check the NTP header for a crypto-NAK kiss-of-death.
+	if len(buf) < msgSize {
+		return ErrInvalidFormat
+	}
+
+	// Check the NTPv4 header for a crypto-NAK kiss-of-death.
 	version := int((buf[0] >> 3) & 0x7)
 	stratum := buf[1]
 	if stratum == 0 && version <= 4 {
@@ -278,7 +288,7 @@ func (s *Session) processResponse(buf []byte) error {
 	}
 
 	// Process all NTS extension fields.
-	offset := ntpHeaderLen
+	offset := msgSize
 	curr := buf[offset:]
 	for len(curr) >= 4 {
 		xtype := extType(binary.BigEndian.Uint16(curr[0:2]))
@@ -336,7 +346,6 @@ func (s *Session) processResponse(buf []byte) error {
 
 		offset += plen
 		curr = buf[offset:]
-
 	}
 
 	return nil

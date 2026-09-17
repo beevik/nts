@@ -20,10 +20,14 @@ import (
 )
 
 const (
-	ntskeProtocol             = "ntske/1"
-	defaultNtsPort            = 4460
-	defaultNtpPort            = 123
-	ntpProtocolID             = uint16(0)
+	ntskeProtocol = "ntske/1"
+
+	defaultPortNTS = 4460
+	defaultPortNTP = 123
+
+	protocolNTPv4 = uint16(0)
+	protocolNTPv5 = uint16(0x8001) // experimental; used by chrony
+
 	algoAEAD_AES_SIV_CMAC_256 = uint16(15)
 	algoAEAD_AES_128_GCM_SIV  = uint16(30)
 )
@@ -74,11 +78,21 @@ func (s *Session) performKeyExchange() error {
 		return errors.New("key exchange: NTS-KE protocol not negotiated")
 	}
 
+	// Determine which NTP protocol version to request.
+	var protocol uint16
+	switch s.options.NTPVersion {
+	case 0, 4:
+		protocol = protocolNTPv4
+	case 5:
+		protocol = protocolNTPv5
+	default:
+		return errors.New("key exchange: invalid NTP protocol version requested")
+	}
+
 	// Build the NTS-KE request by writing records into a buffer.
 	var xmitBuf bytes.Buffer
 	{
-		writeRecProtocols(&xmitBuf, ntpProtocolID)
-
+		writeRecProtocols(&xmitBuf, protocol)
 		writeRecAlgorithms(&xmitBuf, algoAEAD_AES_128_GCM_SIV, algoAEAD_AES_SIV_CMAC_256)
 		writeRecCompliantAes128GcmSiv(&xmitBuf)
 
@@ -155,11 +169,16 @@ loop:
 			if len(rbody) == 0 {
 				return errors.New("key exchange: NTP protocol not supported")
 			}
-			if len(rbody) != 2 {
+			if len(rbody) != 2 && len(rbody) != 4 {
 				return errInvalidRecordSize
 			}
-			p := binary.BigEndian.Uint16(rbody)
-			if p != ntpProtocolID {
+			protocol = binary.BigEndian.Uint16(rbody)
+			switch protocol {
+			case protocolNTPv4:
+				s.ntpProtocol = 4
+			case protocolNTPv5:
+				s.ntpProtocol = 5
+			default:
 				return errors.New("key exchange: NTP protocol not supported")
 			}
 
@@ -239,7 +258,7 @@ loop:
 
 	// Use the default NTP port if no negotiated port was reported.
 	if port == 0 {
-		port = defaultNtpPort
+		port = defaultPortNTP
 	}
 
 	// Form the host:port NTP server address string.
@@ -254,12 +273,12 @@ loop:
 	switch algorithm {
 	case algoAEAD_AES_128_GCM_SIV:
 		if useCompliant128GCM {
-			return s.extractKeys(conn, algoAEAD_AES_128_GCM_SIV, 16, siv.NewGCM)
+			return s.extractKeys(conn, algoAEAD_AES_128_GCM_SIV, protocol, 16, siv.NewGCM)
 		}
-		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, 16, siv.NewGCM)
+		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, protocol, 16, siv.NewGCM)
 
 	case algoAEAD_AES_SIV_CMAC_256:
-		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, 32, siv.NewCMAC)
+		return s.extractKeys(conn, algoAEAD_AES_SIV_CMAC_256, protocol, 32, siv.NewCMAC)
 
 	default:
 		return errors.New("key exchange: no supported algorithm negotiated")
@@ -314,7 +333,7 @@ func processErrorCode(code uint16) error {
 	}
 }
 
-func (s *Session) extractKeys(conn *tls.Conn, algorithmID uint16, keyLength int, aead newAEAD) error {
+func (s *Session) extractKeys(conn *tls.Conn, algorithmID, protocol uint16, keyLength int, aead newAEAD) error {
 	const (
 		keyLabel     = "EXPORTER-network-time-security"
 		c2sIndicator = 0
@@ -322,7 +341,7 @@ func (s *Session) extractKeys(conn *tls.Conn, algorithmID uint16, keyLength int,
 	)
 
 	context := make([]byte, 5)
-	binary.BigEndian.PutUint16(context[0:2], ntpProtocolID)
+	binary.BigEndian.PutUint16(context[0:2], protocol)
 	binary.BigEndian.PutUint16(context[2:4], algorithmID)
 
 	state := conn.ConnectionState()
