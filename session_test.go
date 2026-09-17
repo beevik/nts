@@ -5,14 +5,16 @@
 package nts
 
 import (
+	"bytes"
+	"crypto/rand"
 	"net"
 	"os"
 	"strings"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/beevik/ntp"
+	"github.com/secure-io/siv-go"
 )
 
 // The NTS key-exchange server to use for online unit tests. May be overridden
@@ -92,22 +94,54 @@ func stringOrEmpty(s string) string {
 	return s
 }
 
-func TestAlignSatisfiesSIV(t *testing.T) {
+func TestSIVAlignment(t *testing.T) {
 	if !alignMemory {
 		t.Skip("alignment only required on amd64")
 	}
-	backing := make([]byte, 256)
-	base := uintptr(unsafe.Pointer(&backing[0]))
-	for off := uintptr(0); off < 64; off++ {
-		if (base+off)%sivAlignment != 8 {
+
+	key := make([]byte, 16)
+	_, err := rand.Read(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cipher, err := siv.NewGCM(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 64 {
+		nonceUnaligned := make([]byte, i+cipher.NonceSize())[i:]
+		nonce := align(nonceUnaligned)
+		if _, err := rand.Read(nonce); err != nil {
+			t.Error(err)
 			continue
 		}
-		// 8-byte aligned but not 16: the case siv-go faults on.
-		got := align(backing[off : off+72])
-		if p := uintptr(unsafe.Pointer(&got[0])); p%sivAlignment != 0 {
-			t.Fatalf("align returned a buffer at %%%d == %d", sivAlignment, p%sivAlignment)
+
+		plaintextUnaligned := make([]byte, i+64)[i:]
+		plaintext := align(plaintextUnaligned)
+		if _, err := rand.Read(plaintext); err != nil {
+			t.Error(err)
+			continue
 		}
-		return
+
+		additionalDataUnaligned := make([]byte, i+64)[i:]
+		additionalData := align(additionalDataUnaligned)
+		if _, err := rand.Read(additionalData); err != nil {
+			t.Error(err)
+			continue
+		}
+
+		ciphertext := cipher.Seal(nil, nonce, plaintext, additionalData)
+
+		got, err := cipher.Open(nil, nonce, ciphertext, additionalData)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		if !bytes.Equal(got, plaintext) {
+			t.Error("decrypted plaintext doesn't match original")
+			continue
+		}
 	}
-	t.Skip("no 8-mod-16 offset in backing array")
 }

@@ -28,9 +28,7 @@ import (
 
 var alignMemory = runtime.GOARCH == "amd64"
 
-// sivAlignment is what siv-go's amd64 SIMD requires of the buffers it reads
-// and writes. 8 is not enough: a buffer at 8 mod 16 segfaults.
-const sivAlignment = 16
+const alignment = 16
 
 var (
 	ErrAuthFailedOnClient = errors.New("authentication failed on client")
@@ -426,10 +424,10 @@ func align(slice []byte) []byte {
 		return slice
 	}
 
-	// If the slice is already aligned and a multiple of sivAlignment bytes
-	// in length, simply return it.
+	// If the slice is already aligned and a multiple of 16 bytes in length,
+	// simply return it.
 	ptr := uintptr(unsafe.Pointer(&slice[0]))
-	if ptr&uintptr(sivAlignment-1) == 0 && len(slice)&(sivAlignment-1) == 0 {
+	if ptr&uintptr(alignment-1) == 0 && len(slice)&(alignment-1) == 0 {
 		return slice
 	}
 
@@ -445,14 +443,14 @@ func allocAligned(size int) []byte {
 		return make([]byte, size)
 	}
 
-	// Pad the buffer size to a multiple of sivAlignment bytes.
-	paddedSize := (size + sivAlignment - 1) & ^(sivAlignment - 1)
+	// Pad the buffer size to a multiple of 16 bytes.
+	paddedSize := (size + alignment - 1) & ^(alignment - 1)
 
 	// Try allocating a slice of the padded size. If the result is aligned,
 	// we're done.
 	buf := make([]byte, paddedSize)
 	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	if ptr&uintptr(sivAlignment-1) == 0 {
+	if ptr&uintptr(alignment-1) == 0 {
 		return buf[:size]
 	}
 
@@ -461,9 +459,9 @@ func allocAligned(size int) []byte {
 
 	// Allocate a buffer slightly larger than requested and return a sub-slice
 	// that is guaranteed to be aligned.
-	buf = make([]byte, paddedSize+sivAlignment-1)
+	buf = make([]byte, paddedSize+alignment-1)
 	ptr = uintptr(unsafe.Pointer(&buf[0]))
-	offset := (sivAlignment - int(ptr&uintptr(sivAlignment-1))) & (sivAlignment - 1)
+	offset := (alignment - int(ptr&uintptr(alignment-1))) & (alignment - 1)
 	return buf[offset : offset+size]
 }
 
