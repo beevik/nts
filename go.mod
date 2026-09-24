@@ -1,14 +1,14 @@
 module github.com/beevik/nts
 
-go 1.25.0
+go 1.26.0
 
 require (
-	github.com/beevik/ntp v1.5.0
+	github.com/beevik/ntp v1.6.0
 	github.com/secure-io/siv-go v0.0.0-20180922214919-5ff40651e2c4
 )
 
 require (
 	github.com/aead/cmac v0.0.0-20160719120800-7af84192f0b1 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
