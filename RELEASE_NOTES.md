@@ -1,3 +1,10 @@
+Release v0.3.3
+==============
+
+**Fixes**
+
+* Fixed a memory alignment bug that could cause a panic on amd64 platforms.
+
 Release v0.3.2
 ==============
 
